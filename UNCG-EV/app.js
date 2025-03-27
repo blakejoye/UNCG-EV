@@ -106,39 +106,50 @@ app.put('/reservations/:id', async (req, res) => {
     const { chargerid, starttime, endtime } = req.body;
 
     try {
+        const start = DateTime.fromISO(starttime, { zone: "America/New_York" }).toUTC().toISO();
+        const end = DateTime.fromISO(endtime, { zone: "America/New_York" }).toUTC().toISO();
+
         // Check if reservation exists
         const checkReservation = await pool.query('SELECT * FROM reservations WHERE reservationid = $1', [id]);
         if (checkReservation.rows.length === 0) {
             return res.status(404).json({ message: "Booking not found." });
         }
 
-        // Convert from EST to UTC
-        const start = DateTime.fromISO(starttime, { zone: "America/New_York" }).toUTC().toISO();
-        const end = DateTime.fromISO(endtime, { zone: "America/New_York" }).toUTC().toISO();
-
-        // ✅ Check for conflicts before updating
+        // Conflict check to prevent overlaps during edit
         const conflict = await pool.query(`
-            SELECT * FROM reservations
-            WHERE chargerid = $1 AND reservationid != $2
-              AND ((starttime < $3 AND endtime > $2))
+            SELECT * FROM reservations 
+            WHERE chargerid = $1 
+              AND reservationid != $2
+              AND (
+                  (starttime < $4 AND endtime > $3)
+              )
         `, [chargerid, id, start, end]);
 
         if (conflict.rows.length > 0) {
             return res.status(400).json({ message: "This time slot is already booked." });
         }
 
-        // ✅ Update reservation
-        await pool.query(
-            'UPDATE reservations SET chargerid = $1, starttime = $2, endtime = $3 WHERE reservationid = $4',
-            [chargerid, start, end, id]
-        );
+        // Update booking
+        await pool.query(`
+            UPDATE reservations 
+            SET chargerid = $1, starttime = $2, endtime = $3 
+            WHERE reservationid = $4
+        `, [chargerid, start, end, id]);
 
         res.json({ message: "Booking updated successfully!" });
     } catch (err) {
         console.error("❌ Error updating booking:", err);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ message: "Internal server error", error: err.message });
     }
 });
+
+
+
+
+
+
+
+
 
 
 

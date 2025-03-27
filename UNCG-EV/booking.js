@@ -47,6 +47,11 @@ async function fetchAvailableTimeSlots() {
 }
 
 // ✅ Generate available time slots dynamically, removing booked slots
+// ✅ Generate available time slots dynamically, highlighting booked slots
+// ✅ Generate available time slots dynamically, highlighting booked slots
+// ✅ Generate available time slots dynamically, highlighting booked slots
+// ✅ Generate available time slots dynamically, highlighting booked slots
+// ✅ Generate available time slots dynamically, highlighting booked slots
 function generateTimeSlots(reservations, chargerid, selectedDate) {
     const startSelect = document.getElementById("startTime");
     const endSelect = document.getElementById("endTime");
@@ -58,23 +63,19 @@ function generateTimeSlots(reservations, chargerid, selectedDate) {
 
     if (!chargerid || !selectedDate) return;
 
-    // ✅ Collect ALL booked time ranges for this charger & date
-    let bookedIntervals = [];
+    console.log(`📅 Selected Date: ${selectedDate}`);
 
-    reservations.forEach(res => {
-        if (res.chargerid == chargerid && res.starttime.startsWith(selectedDate)) {
-            let start = new Date(res.starttime);
-            let end = new Date(res.endtime);
+    // ✅ Get all booked times for the selected charger and adjust to EST
+    const bookedTimes = reservations
+        .filter(res => res.chargerid == chargerid && res.starttime.includes(selectedDate))
+        .map(res => {
+            let startEST = convertUTCtoEST(res.starttime);
+            let endEST = convertUTCtoEST(res.endtime);
 
-            // ✅ Store ALL 15-minute slots inside this range
-            while (start < end) {
-                bookedIntervals.push(start.toISOString()); // Store in ISO format for comparison
-                start.setMinutes(start.getMinutes() + 15);
-            }
-        }
-    });
+            console.log(`🔴 Booked Slot: ${startEST.toLocaleTimeString()} - ${endEST.toLocaleTimeString()} (Adjusted EST)`);
 
-    console.log("🚧 Booked Intervals:", bookedIntervals); // Debugging Output
+            return { start: startEST, end: endEST };
+        });
 
     let availableTimes = [];
 
@@ -85,34 +86,36 @@ function generateTimeSlots(reservations, chargerid, selectedDate) {
             let timeString = `${displayHour}:${minutes.toString().padStart(2, '0')} ${amPm}`;
             let value = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
 
-            const currentTime = new Date(`${selectedDate}T${value}`);
-            currentTime.setHours(currentTime.getHours() + 4); // Adjust for server timezone
+            let currentTime = new Date(`${selectedDate}T${value}`);
 
-            let currentTimeISO = currentTime.toISOString(); // Convert to ISO format for comparison
 
-            // ✅ Check if this time is in the bookedIntervals array
-            const isBooked = bookedIntervals.includes(currentTimeISO);
+            // ✅ Check if this time is already booked
+            const isBooked = bookedTimes.some(reservation =>
+                currentTime >= reservation.start && currentTime < reservation.end
+            );
 
             let startOption = document.createElement("option");
             startOption.value = value;
             startOption.textContent = timeString;
-
             if (isBooked) {
-                startOption.style.color = "red"; // 🔴 Mark booked slots in red
-                startOption.disabled = true;     // ❌ Disable booked slots
-            } else {
-                availableTimes.push({ value, timeString });
+                startOption.style.color = "red";
+                startOption.disabled = true;
+                console.log(`⛔ Blocked Slot: ${timeString} (Corrected EST)`);
             }
-
             startSelect.appendChild(startOption);
+            availableTimes.push({ value, timeString });
         }
     }
 
     startSelect.dataset.availableTimes = JSON.stringify(availableTimes);
 }
 
-
-
+// ✅ Function to Convert UTC time to EST (-4 hours)
+function convertUTCtoEST(utcDateTime) {
+    let date = new Date(utcDateTime);
+    date.setHours(date.getHours() - 4); // ✅ Hardcoded EST adjustment
+    return date;
+}
 // ✅ Populate end time dropdown based on selected start time
 function updateEndTimeOptions() {
     const startSelect = document.getElementById("startTime");
@@ -131,17 +134,25 @@ function updateEndTimeOptions() {
         if (timeSlot.value === selectedStartTime) {
             canAddTimes = true;
         }
+
         if (canAddTimes) {
             let endOption = document.createElement("option");
             endOption.value = timeSlot.value;
             endOption.textContent = timeSlot.timeString;
+
+            // ✅ Check if this slot is disabled in the start time list (meaning it's booked)
+            const matchingStartOption = Array.from(startSelect.options).find(opt => opt.value === timeSlot.value);
+            if (matchingStartOption && matchingStartOption.disabled) {
+                endOption.disabled = true;
+                endOption.style.color = "red";
+            }
+
             endSelect.appendChild(endOption);
         }
     });
 
     endSelect.disabled = false;
 }
-
 
 // ✅ Submit Booking with Start & End Time
 async function submitBooking() {
@@ -199,7 +210,6 @@ function formatTimeTo12Hour(utcDateTime) {
 }
 
 // ✅ Fetch and display bookings
-// ✅ Fetch and display bookings
 async function fetchBookings() {
     try {
         const response = await fetch(`${BASE_URL}/reservations`);
@@ -247,58 +257,69 @@ async function fetchBookings() {
 function editBooking(reservationId, chargerId, currentStartTime, currentEndTime, currentDate) {
     document.getElementById("editModal").style.display = "block";
 
-    // ✅ Keep the same station (disable dropdown)
     const chargerSelect = document.getElementById("editChargerSelect");
     chargerSelect.innerHTML = `<option value="${chargerId}" selected>Current Station</option>`;
-    chargerSelect.disabled = true; // Prevent changing charger
+    chargerSelect.disabled = true;
 
-    // ✅ Set Date
     document.getElementById("editBookingDate").value = currentDate;
 
-    // ✅ Convert times and populate dropdowns
-    document.getElementById("editStartTime").innerHTML = generateTimeOptions(formatTimeForDropdown(currentStartTime));
-    document.getElementById("editEndTime").innerHTML = generateTimeOptions(formatTimeForDropdown(currentEndTime));
+    // Format to dropdown value ("HH:MM:SS")
+    const startValue = currentStartTime.split("T")[1];
+    const endValue = currentEndTime.split("T")[1];
 
-    // ✅ Set Update Booking Button Action
+    // Call to populate red-blocked times
+    populateEditTimeSlots(chargerId, currentDate, reservationId).then(() => {
+        const startSelect = document.getElementById("editStartTime");
+        const endSelect = document.getElementById("editEndTime");
+
+        startSelect.value = startValue;
+        endSelect.value = endValue;
+
+        // Add change listener like the main form
+        startSelect.addEventListener("change", updateEditEndTimeOptions);
+    });
+
     document.getElementById("editBookingBtn").onclick = function () {
         submitEditBooking(reservationId, chargerId);
     };
 }
+function updateEditEndTimeOptions() {
+    const startSelect = document.getElementById("editStartTime");
+    const endSelect = document.getElementById("editEndTime");
 
+    endSelect.innerHTML = '<option value="">Select End Time</option>';
+    endSelect.disabled = true;
 
-// ✅ Convert stored UTC time to dropdown format
-// ✅ Generate dropdown options for time fields
-function generateTimeOptions(selectedTime) {
-    let options = `<option value="">Select Time</option>`;
+    const selectedStartTime = startSelect.value;
+    if (!selectedStartTime) return;
 
-    for (let hour = 0; hour < 24; hour++) {
-        for (let minutes = 0; minutes < 60; minutes += 15) {
-            let amPm = hour < 12 ? "AM" : "PM";
-            let displayHour = hour % 12 || 12;
-            let timeString = `${displayHour}:${minutes.toString().padStart(2, '0')} ${amPm}`;
-            let value = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+    const availableTimes = JSON.parse(startSelect.dataset.availableTimes || "[]");
 
-            let selected = selectedTime === timeString ? "selected" : "";
-            options += `<option value="${value}" ${selected}>${timeString}</option>`;
+    let canAddTimes = false;
+    availableTimes.forEach(timeSlot => {
+        if (timeSlot.value === selectedStartTime) {
+            canAddTimes = true;
         }
-    }
 
-    return options;
+        if (canAddTimes) {
+            const option = document.createElement("option");
+            option.value = timeSlot.value;
+            option.textContent = timeSlot.timeString;
+
+            if (timeSlot.disabled) {
+                option.disabled = true;
+                option.style.color = "red";
+            }
+
+            endSelect.appendChild(option);
+        }
+    });
+
+    endSelect.disabled = false;
 }
 
 
-// ✅ Convert stored UTC time to dropdown format
-function formatTimeForDropdown(utcDateTime) {
-    const utcDate = new Date(utcDateTime);
-    utcDate.setHours(utcDate.getHours() - 4); // Adjust UTC to EST (-4 hours)
 
-    let hour = utcDate.getHours();
-    const minute = utcDate.getMinutes().toString().padStart(2, "0");
-    const amPm = hour >= 12 ? "PM" : "AM";
-    hour = hour % 12 || 12;
-
-    return `${hour}:${minute} ${amPm}`;
-}
 // ✅ Cancel a booking
 async function cancelBooking(reservationId) {
     if (!confirm("Are you sure you want to cancel this booking?")) return;
@@ -347,25 +368,8 @@ async function submitEditBooking(reservationId) {
     const endtime = `${date}T${endTime}`;
 
     try {
-        // ✅ Fetch existing reservations to check for conflicts
-        const reservationsResponse = await fetch(`${BASE_URL}/reservations`);
-        const reservations = await reservationsResponse.json();
+        console.log("🛠️ Sending Update Request:", { chargerid, starttime, endtime });
 
-        const hasConflict = reservations.some(reservation => {
-            if (reservation.reservationid == reservationId) return false; // Ignore current reservation
-            return (
-                reservation.chargerid == chargerid &&
-                date === reservation.starttime.split('T')[0] &&
-                !(endtime <= reservation.starttime || starttime >= reservation.endtime)
-            );
-        });
-
-        if (hasConflict) {
-            alert("⚠️ This charger is already booked during the selected time.");
-            return;
-        }
-
-        // ✅ Proceed with updating the booking
         const response = await fetch(`${BASE_URL}/reservations/${reservationId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -373,19 +377,21 @@ async function submitEditBooking(reservationId) {
         });
 
         const result = await response.json();
+        console.log("🛠️ Server Response:", result); // Log the response
 
         if (response.ok) {
             alert("✅ Booking updated successfully!");
             fetchBookings();
             closeEditModal();
         } else {
-            alert(`⚠️ Update Failed: ${result.message}`);
+            alert(`⚠️ Update Failed: ${result.message || "Unknown Error"}`);
         }
     } catch (error) {
         console.error('❌ Error updating booking:', error);
         alert("⚠️ Could not update booking. Please try again.");
     }
 }
+
 
 
 function closeEditModal() {
@@ -408,58 +414,64 @@ async function populateEditTimeSlots(chargerid, selectedDate, reservationId) {
     endSelect.disabled = true;
 
     try {
-        // ✅ Fetch all reservations
         const reservationsResponse = await fetch(`${BASE_URL}/reservations`);
         const reservations = await reservationsResponse.json();
 
-        // ✅ Get booked times excluding the current reservation
+        // Convert and filter reservations (excluding current one)
         const bookedTimes = reservations
-            .filter(res => res.chargerid == chargerid && res.starttime.includes(selectedDate) && res.reservationid != reservationId)
-            .map(res => ({
-                start: new Date(res.starttime),
-                end: new Date(res.endtime),
-            }));
+            .filter(res =>
+                res.chargerid == chargerid &&
+                res.starttime.includes(selectedDate) &&
+                res.reservationid != reservationId
+            )
+            .map(res => {
+                const start = new Date(res.starttime);
+                const end = new Date(res.endtime);
+                start.setHours(start.getHours() - 4); // Adjust to EST
+                end.setHours(end.getHours() - 4);
+                return { start, end };
+            });
 
         let availableTimes = [];
 
         for (let hour = 0; hour < 24; hour++) {
             for (let minutes = 0; minutes < 60; minutes += 15) {
-                let amPm = hour < 12 ? "AM" : "PM";
-                let displayHour = hour % 12 || 12;
-                let timeString = `${displayHour}:${minutes.toString().padStart(2, '0')} ${amPm}`;
-                let value = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+                const amPm = hour < 12 ? "AM" : "PM";
+                const displayHour = hour % 12 || 12;
+                const timeString = `${displayHour}:${minutes.toString().padStart(2, '0')} ${amPm}`;
+                const value = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
 
                 const currentTime = new Date(`${selectedDate}T${value}`);
 
-                // ✅ Check if this time is booked
                 const isBooked = bookedTimes.some(reservation =>
                     currentTime >= reservation.start && currentTime < reservation.end
                 );
 
-                let startOption = document.createElement("option");
-                startOption.value = value;
-                startOption.textContent = timeString;
+                const option = document.createElement("option");
+                option.value = value;
+                option.textContent = timeString;
 
                 if (isBooked) {
-                    startOption.disabled = true; // Disable booked times
-                    startOption.style.color = "red"; // Highlight in red
+                    option.disabled = true;
+                    option.style.color = "red";
                 } else {
                     availableTimes.push({ value, timeString });
                 }
 
-                startSelect.appendChild(startOption);
+                startSelect.appendChild(option);
+                availableTimes.push({
+                    value,
+                    timeString,
+                    disabled: isBooked
+                });
             }
         }
 
+        // Store for use in end time population
         startSelect.dataset.availableTimes = JSON.stringify(availableTimes);
     } catch (error) {
-        console.error('❌ Error fetching reservations:', error);
+        console.error('❌ Error populating edit time slots:', error);
     }
 }
-
-
-
-
-
 
 
