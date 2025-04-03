@@ -478,8 +478,5 @@ function startPollingReservations() {
     setInterval(() => {
         fetchBookings();              // Refresh bookings table
         fetchAvailableTimeSlots();   // Refresh available dropdowns
-    }, 10000); // every 30 seconds (you can lower this to 10-15s if needed)
+    }, 30000); // every 30 seconds (you can lower this to 10-15s if needed)
 }
-
-
-

@@ -155,17 +155,3 @@ app.delete('/cleanup-reservations', async (req, res) => {
         res.status(500).json({ message: "Cleanup failed.", error: err.message });
     }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
